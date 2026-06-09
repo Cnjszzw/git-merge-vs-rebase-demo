@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1100">
+<title>Git Merge vs Rebase · 基于 WVP 真实提交记录</title>
+<style>
+  :root {
+    --bg: #2b2d30;
+    --panel: #313335;
+    --text: #bbb;
+    --text2: #888;
+    --border: #3c3f41;
+    --green: #399644;
+    --green-bright: #59a869;
+    --blue: #3574c2;
+    --blue-bright: #5890d8;
+    --purple: #8b5c9e;
+    --purple-bright: #a87cc0;
+    --orange: #c47533;
+    --orange-bright: #e08d4a;
+    --red: #b03939;
+    --line-dim: #4a4d50;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    min-height: 100vh;
+  }
+  .page { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  h1 { font-size: 26px; font-weight: 700; color: #e0e0e0; }
+  h1 span { font-weight: 400; color: var(--text2); font-size: 18px; }
+  h2 { font-size: 17px; font-weight: 600; color: #ccc; margin: 44px 0 16px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 28px 20px; margin: 16px 0; overflow-x: auto;
+  }
+  .panel.merge { border-left: 3px solid #e07b4c; }
+  .panel.rebase { border-left: 3px solid #5890d8; }
+
+  .graph-svg { display: block; width: 100%; height: auto; }
+
+  .info-row {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    margin: 12px 0; font-size: 13px; color: var(--text2);
+  }
+  .user-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 3px; font-size: 12px; font-weight: 600;
+  }
+  .u-z { background: #39964422; color: var(--green-bright); }
+  .u-c { background: #3574c222; color: var(--blue-bright); }
+  .u-x { background: #8b5c9e22; color: var(--purple-bright); }
+  .u-l { background: #c4753322; color: var(--orange-bright); }
+
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 16px 0; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 22px 18px;
+  }
+  .card.merge { border-left: 3px solid #e07b4c; }
+  .card.rebase { border-left: 3px solid #5890d8; }
+
+  .card h3 { font-size: 15px; margin-bottom: 12px; }
+  .card p { font-size: 13px; color: var(--text2); margin: 6px 0; line-height: 1.6; }
+
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 700;
+  }
+  .badge-m { background: #e07b4c33; color: #e07b4c; }
+  .badge-r { background: #5890d833; color: #5890d8; }
+
+  .callout {
+    padding: 12px 16px; border-radius: 6px; margin: 12px 0; font-size: 13px; line-height: 1.6;
+  }
+  .callout.warn { background: #e07b4c11; border: 1px solid #e07b4c33; }
+  .callout.info { background: #5890d811; border: 1px solid #5890d833; }
+
+  .step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%; font-size: 12px; font-weight: 700;
+    margin-right: 6px; flex-shrink: 0;
+    background: #e07b4c33; color: #e07b4c;
+  }
+  .step-num.blue { background: #5890d833; color: #5890d8; }
+
+  .stats { display: flex; gap: 32px; justify-content: center; margin: 20px 0; }
+  .stat { text-align: center; }
+  .stat-num { font-size: 48px; font-weight: 800; color: #e07b4c; }
+  .stat-label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+
+  .legend-row { display: flex; gap: 20px; flex-wrap: wrap; font-size: 12px; color: var(--text2); margin-top: 10px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+  .legend-line { width: 16px; height: 2px; display: inline-block; margin-right: 4px; vertical-align: middle; }
+
+  footer { text-align: center; color: var(--text2); font-size: 12px; margin-top: 60px; }
+  footer a { color: var(--blue-bright); }
+
+  @media (max-width: 800px) { .compare-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+<h1>Git Merge <span>· 从你的 WVP 真实提交画出来的</span></h1>
+
+<div class="info-row">
+  <span class="user-chip u-z">👤 zhaozhiwen（你）</span>
+  <span class="user-chip u-c">👤 chenbin</span>
+  <span class="user-chip u-x">👤 xuzhiqiang</span>
+  <span class="user-chip u-l">👤 luo'wei</span>
+  <span style="margin-left:4px">四个人的一次协作，触发了 merge</span>
+</div>
+
+<!-- ====================== 真实 MERGE 图 ====================== -->
+<h2>① 你仓库里真实发生的一次 Merge</h2>
+
+<div class="panel merge">
+  <svg class="graph-svg" viewBox="0 0 780 520" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="sd"><feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-opacity="0.25"/></filter>
+    </defs>
+
+    <!-- ===== 主干线（绿）= 本地 main，X=170 ===== -->
+    <line x1="170" y1="35" x2="170" y2="490" stroke="#399644" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- ===== 右侧分支线（蓝）= origin/main，X=380 ===== -->
+    <!-- 从 11505dbf(common ancestor) 到 merge commit -->
+    <line x1="380" y1="360" x2="380" y2="175" stroke="#3574c2" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- ===== 连接线 ===== -->
+    <!-- Merge 的连接：从 merge commit → 右侧第一个 commit -->
+    <path d="M 170 152 L 240 152 Q 290 152 330 168 L 380 177" stroke="#6e6e6e" stroke-width="1.5" fill="none" stroke-dasharray="4,3"/>
+    <!-- 分叉点的连接：右侧最后一个 commit → 共同祖先 -->
+    <path d="M 380 370 L 330 370 Q 280 378 240 395 L 170 400" stroke="#6e6e6e" stroke-width="1.5" fill="none" stroke-dasharray="4,3"/>
+
+    <!-- ===================== COMMIT 节点 ===================== -->
+
+    <!-- Row 1: 663b49cb (main, 最新) -->
+    <circle cx="170" cy="42" r="7" fill="#399644" stroke="#2b2d30" stroke-width="2" filter="url(#sd)"/>
+    <text x="192" y="39" fill="#59a869" font-size="12" font-weight="600">663b49cb</text>
+    <text x="192" y="53" fill="#8c8c8c" font-size="11">寻找最高点采样率调整至30000</text>
+    <text x="406" y="48" fill="#4a4d50" font-size="10">zhaozhiwen · 3月前</text>
+
+    <!-- Row 2: 990f930c (main) -->
+    <circle cx="170" cy="87" r="7" fill="#399644" stroke="#2b2d30" stroke-width="2" filter="url(#sd)"/>
+    <text x="192" y="84" fill="#59a869" font-size="12" font-weight="600">990f930c</text>
+    <text x="192" y="98" fill="#8c8c8c" font-size="11">优化一键上报样式</text>
+    <text x="384" y="93" fill="#4a4d50" font-size="10">zhaozhiwen · 3月前</text>
+
+    <!-- Row 3: 36a4e158 MERGE COMMIT (main) -->
+    <circle cx="170" cy="132" r="10" fill="#6e6e6e" stroke="#e07b4c" stroke-width="2.5" filter="url(#sd)"/>
+    <circle cx="167" cy="129" r="4" fill="#399644" opacity="0.85"/>
+    <circle cx="173" cy="135" r="4" fill="#3574c2" opacity="0.85"/>
+    <text x="192" y="129" fill="#e07b4c" font-size="12" font-weight="700">36a4e158</text>
+    <text x="192" y="143" fill="#e07b4c" font-size="11">Merge remote-tracking branch 'origin/main' ← 合并节点</text>
+    <text x="550" y="138" fill="#4a4d50" font-size="10">zhaozhiwen · 4月前</text>
+
+    <!-- Row 4: d836dc2c (main, local) + b4d4ca00 (right branch) -->
+    <circle cx="170" cy="180" r="7" fill="#399644" stroke="#2b2d30" stroke-width="2" filter="url(#sd)"/>
+    <text x="192" y="177" fill="#59a869" font-size="12" font-weight="600">d836dc2c</text>
+    <text x="192" y="191" fill="#8c8c8c" font-size="11">树点播取消选中时避免操作离线设备</text>
+    <text x="192" y="204" fill="#4a4d50" font-size="10">zhaozhiwen</text>
+
+    <circle cx="380" cy="180" r="7" fill="#3574c2" stroke="#2b2d30" stroke-width="2" filter="url(#sd)"/>
+    <text x="400" y="177" fill="#5890d8" font-size="12" font-weight="600">b4d4ca00</text>
+    <text x="400" y="191" fill="#8c8c8c" font-size="11">优化即时通讯发照片和发视频消息定位</text>
+    <text x="400" y="204" fill="#4a4d50" font-size="10">chenbin</text>
+
+    <!-- Row 5: 空隙 + d82fa57c (right branch) -->
+    <circle cx="380" cy="225" r="7" fill="#3574c2" stroke="#2b2d30" stroke-width="2" filter="url(#sd)"/>
+    <text x="400" y="222" fill="#5890d8" font-size="12" font-weight="600">d82fa57c</text>
+    <text x="400" y="236" fill="#8c8c8c" font-size="11">离线地图新增手表设备的定位</text>
+    <text x="400" y="249" fill="#4a4d50" font-size="10">chenbin</text>
+
+    <!-- Row 6: 空隙 + 6918db77 (right branch) -->
+    <circle cx="380" cy="270" r="7" fill="#3574c2" stroke="#2b2d30" stroke-width="2" filter="url(#sd)"/>
+    <text x="400" y="267" fill="#5890d8" font-size="12" font-weight="600">6918db77</text>
+    <text x="400" y="281" fill="#8c8c8c" font-size="11">GIS在线地图新增手表设备</text>
+    <text x="400" y="294" fill="#4a4d50" font-size="10">chenbin</text>
+
+    <!-- Row 7: 空隙 + 962d3e5a (right branch) -->
+    <circle cx="380" cy="315" r="7" fill="#3574c2" stroke="#2b2d30" stroke-width="2" filter="url(#sd)"/>
+    <text x="400" y="312" fill="#5890d8" font-size="12" font-weight="600">962d3e5a</text>
+    <text x="400" y="326" fill="#8c8c8c" font-size="11">feat(device): 添加手环设备管理功能</text>
+    <text x="400" y="339" fill="#4a4d50" font-size="10">xuzhiqiang</text>
+
+    <!-- Row 8: 空隙 + 94347729 (right branch, 最后一个) -->
+    <circle cx="380" cy="360" r="7" fill="#3574c2" stroke="#2b2d30" stroke-width="2" filter="url(#sd)"/>
+    <text x="400" y="357" fill="#5890d8" font-size="12" font-weight="600">94347729</text>
+    <text x="400" y="371" fill="#8c8c8c" font-size="11">尝试修复网络切换导致资源加载卡住</text>
+    <text x="400" y="384" fill="#4a4d50" font-size="10">luo'wei</text>
+
+    <!-- Row 9: 11505dbf (共同祖先) -->
+    <circle cx="170" cy="405" r="7" fill="#399644" stroke="#2b2d30" stroke-width="2" filter="url(#sd)"/>
+    <text x="192" y="402" fill="#59a869" font-size="12" font-weight="600">11505dbf</text>
+    <text x="192" y="416" fill="#8c8c8c" font-size="11">fix(screen): 修复屏幕页面视频播放清理逻辑</text>
+    <text x="466" y="411" fill="#4a4d50" font-size="10">xuzhiqiang</text>
+
+    <!-- Row 10: c65002c1 (更早的) -->
+    <circle cx="170" cy="450" r="7" fill="#399644" stroke="#2b2d30" stroke-width="2" filter="url(#sd)"/>
+    <text x="192" y="447" fill="#59a869" font-size="12" font-weight="600">c65002c1</text>
+    <text x="192" y="461" fill="#8c8c8c" font-size="11">android添加缩放方式配置</text>
+    <text x="400" y="456" fill="#4a4d50" font-size="10">luo'wei</text>
+
+    <!-- ===== 分支标签 ===== -->
+    <rect x="48" y="32" width="38" height="17" rx="3" fill="#39964433"/>
+    <text x="67" y="45" text-anchor="middle" fill="#59a869" font-size="10" font-weight="700">main</text>
+
+    <rect x="308" y="258" width="62" height="17" rx="3" fill="#3574c233"/>
+    <text x="339" y="271" text-anchor="middle" fill="#5890d8" font-size="10" font-weight="700">origin/main</text>
+
+    <!-- 时间轴箭头 -->
+    <text x="6" y="48" fill="#4a4d50" font-size="9">↑ 新</text>
+    <text x="8" y="478" fill="#4a4d50" font-size="9">↓ 旧</text>
+  </svg>
+
+  <div class="legend-row">
+    <span><span class="legend-line" style="background:#399644"></span> main（本地）</span>
+    <span><span class="legend-line" style="background:#3574c2"></span> origin/main（远端·同事已 push）</span>
+    <span><span class="legend-dot" style="background:#6e6e6e;border:2px solid #e07b4c"></span> Merge 节点</span>
+    <span>--- 虚线 = 连接关系</span>
+  </div>
+</div>
+
+<!-- ====================== 讲解 ====================== -->
+<h2>② 这张图里发生了什么</h2>
+
+<div class="panel" style="padding:20px 24px">
+  <p style="font-size:14px;line-height:1.8;color:var(--text)">
+    <span class="step-num">1</span> xuzhiqiang 提交了 <b>11505dbf</b>（屏幕页面修复），这是共同祖先，一切从这里开始
+  </p>
+  <p style="font-size:14px;line-height:1.8;color:var(--text);margin-top:8px">
+    <span class="step-num">2</span> <b>右路（蓝线）</b>：luo'wei → xuzhiqiang → chenbin 三人连续 push 了 <b>5 个 commit</b> 到 origin/main<br>
+    <span style="padding-left:28px;color:var(--text2)">分别是：网络修复 → 手环设备 → GIS手表 → 离线地图 → 即时通讯优化</span>
+  </p>
+  <p style="font-size:14px;line-height:1.8;color:var(--text);margin-top:8px">
+    <span class="step-num">3</span> <b>左路（绿线）</b>：你（zhaozhiwen）在本地提交了 <b>d836dc2c</b>（树点播优化），还没来得及 push
+  </p>
+  <p style="font-size:14px;line-height:1.8;color:var(--text);margin-top:8px">
+    <span class="step-num">4</span> 你执行 <code style="background:#1e1f22;padding:1px 6px;border-radius:3px;color:#7ee787">git pull</code> → Git 发现蓝线和绿线已经分叉<br>
+    <span style="padding-left:28px;color:var(--text2)">Git 默认策略 = merge → 自动创建了 <b style="color:#e07b4c">36a4e158</b> 这个 Merge 节点</span>
+  </p>
+  <p style="font-size:14px;line-height:1.8;color:var(--text);margin-top:8px">
+    <span class="step-num">5</span> 之后你又提交了 990f930c 和 663b49cb，在 merge 之上继续工作
+  </p>
+
+  <div class="callout warn" style="margin-top:16px">
+    <b>关键点：</b>Merge 没有改写任何人的 commit。luo'wei、xuzhiqiang、chenbin、你的 commit 全部原样保留。<br>
+    代价就是多了一个 <b style="color:#e07b4c">36a4e158 Merge branch...</b> 节点，history 多了一条分叉。
+  </div>
+</div>
+
+<!-- ====================== 如果换成 Rebase ====================== -->
+<h2>③ 同样场景，如果换成 <span class="badge badge-r">git pull --rebase</span></h2>
+
+<div class="panel rebase">
+  <svg class="graph-svg" viewBox="0 0 780 420" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="sd2"><feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-opacity="0.25"/></filter>
+    </defs>
+
+    <!-- 一条直线（绿），X=170 -->
+    <line x1="170" y1="35" x2="170" y2="380" stroke="#399644" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- ===== COMMITS 从上到下（新→旧）===== -->
+    <!-- 663b49cb -->
+    <circle cx="170" cy="42" r="7" fill="#399644" stroke="#2b2d30" stroke-width="2" filter="url(#sd2)"/>
+    <text x="192" y="39" fill="#59a869" font-size="12" font-weight="600">663b49cb</text>
+    <text x="192" y="53" fill="#8c8c8c" font-size="11">寻找最高点采样率调整至30000</text>
+
+    <!-- 990f930c -->
+    <circle cx="170" cy="87" r="7" fill="#399644" stroke="#2b2d30" stroke-width="2" filter="url(#sd2)"/>
+    <text x="192" y="84" fill="#59a869" font-size="12" font-weight="600">990f930c</text>
+    <text x="192" y="98" fill="#8c8c8c" font-size="11">优化一键上报样式</text>
+
+    <!-- d836dc2c（本来在分叉上的，rebase 后搬到这里） -->
+    <circle cx="170" cy="132" r="7" fill="#399644" stroke="#2b2d30" stroke-width="2" filter="url(#sd2)"/>
+    <text x="192" y="129" fill="#59a869" font-size="12" font-weight="600">d836dc2c</text>
+    <text x="192" y="143" fill="#8c8c8c" font-size="11">树点播取消选中时避免操作离线设备</text>
+
+    <!-- origin/main 的5个commit，原样排在主线上 -->
+    <circle cx="170" cy="177" r="7" fill="#3574c2" stroke="#2b2d30" stroke-width="2" filter="url(#sd2)"/>
+    <text x="192" y="174" fill="#5890d8" font-size="12" font-weight="600">b4d4ca00</text>
+    <text x="192" y="188" fill="#8c8c8c" font-size="11">优化即时通讯发照片和发视频消息定位</text>
+
+    <circle cx="170" cy="222" r="7" fill="#3574c2" stroke="#2b2d30" stroke-width="2" filter="url(#sd2)"/>
+    <text x="192" y="219" fill="#5890d8" font-size="12" font-weight="600">d82fa57c</text>
+    <text x="192" y="233" fill="#8c8c8c" font-size="11">离线地图新增手表设备的定位</text>
+
+    <circle cx="170" cy="267" r="7" fill="#3574c2" stroke="#2b2d30" stroke-width="2" filter="url(#sd2)"/>
+    <text x="192" y="264" fill="#5890d8" font-size="12" font-weight="600">6918db77</text>
+    <text x="192" y="278" fill="#8c8c8c" font-size="11">GIS在线地图新增手表设备</text>
+
+    <circle cx="170" cy="312" r="7" fill="#3574c2" stroke="#2b2d30" stroke-width="2" filter="url(#sd2)"/>
+    <text x="192" y="309" fill="#5890d8" font-size="12" font-weight="600">962d3e5a</text>
+    <text x="192" y="323" fill="#8c8c8c" font-size="11">feat(device): 添加手环设备管理功能</text>
+
+    <circle cx="170" cy="357" r="7" fill="#3574c2" stroke="#2b2d30" stroke-width="2" fill-opacity="0.7"/>
+    <text x="192" y="354" fill="#5890d8" font-size="12" font-weight="600">94347729</text>
+    <text x="192" y="368" fill="#8c8c8c" font-size="11">尝试修复网络切换导致资源加载卡住</text>
+    <text x="460" y="363" fill="#5890d8" font-size="9" font-style="italic">这个 commit 的 hash 变了（被 rebase 重写）</text>
+
+    <!-- 11505dbf common ancestor -->
+    <circle cx="170" cy="405" r="7" fill="#399644" stroke="#2b2d30" stroke-width="2" filter="url(#sd2)"/>
+    <text x="192" y="402" fill="#59a869" font-size="12" font-weight="600">11505dbf</text>
+    <text x="192" y="416" fill="#8c8c8c" font-size="11">fix(screen): 修复屏幕页面视频播放清理逻辑</text>
+
+    <!-- 时间 -->
+    <text x="6" y="48" fill="#4a4d50" font-size="9">↑ 新</text>
+    <text x="8" y="428" fill="#4a4d50" font-size="9">↓ 旧</text>
+
+    <!-- main 标签 -->
+    <rect x="44" y="32" width="38" height="17" rx="3" fill="#39964433"/>
+    <text x="63" y="45" text-anchor="middle" fill="#59a869" font-size="10" font-weight="700">main</text>
+  </svg>
+
+  <div class="callout info" style="margin-top:12px">
+    <b>区别：</b>d836dc2c 被 "搬" 到 b4d4ca00 上面，所有人排成一条直线。<br>
+    没有那个灰色的 Merge 节点了。但 94347729 的 commit hash <b>变了</b>（因为它的 parent 从 11505dbf 变成了 962d3e5a——虽然内容没变）。
+  </div>
+</div>
+
+<!-- ====================== 并排对比 ====================== -->
+<h2>④ 并排对比</h2>
+
+<div class="compare-grid">
+  <div class="card merge">
+    <h3><span class="badge badge-m">git pull</span>（默认 = merge）</h3>
+    <svg viewBox="0 0 320 160" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg">
+      <filter id="s6"><feDropShadow dx="0" dy="1" stdDeviation="1" flood-opacity="0.2"/></filter>
+      <!-- 绿线 -->
+      <line x1="80" y1="20" x2="80" y2="145" stroke="#399644" stroke-width="2"/>
+      <!-- 蓝线 -->
+      <line x1="220" y1="50" x2="220" y2="120" stroke="#3574c2" stroke-width="2"/>
+      <!-- connectors -->
+      <path d="M 80 40 L 140 40 L 180 50 L 220 55" stroke="#6e6e6e" stroke-width="1" fill="none" stroke-dasharray="3,2"/>
+      <path d="M 220 115 L 180 115 L 140 130 L 80 130" stroke="#6e6e6e" stroke-width="1" fill="none" stroke-dasharray="3,2"/>
+      <!-- merge node -->
+      <circle cx="80" cy="40" r="7" fill="#6e6e6e" stroke="#e07b4c" stroke-width="2" filter="url(#s6)"/>
+      <circle cx="78" cy="38.5" r="3" fill="#399644"/>
+      <circle cx="82" cy="41.5" r="3" fill="#3574c2"/>
+      <!-- other nodes -->
+      <circle cx="80" cy="22" r="5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+      <circle cx="80" cy="70" r="5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+      <circle cx="220" cy="70" r="5" fill="#3574c2" stroke="#2b2d30" stroke-width="1.5"/>
+      <circle cx="220" cy="95" r="5" fill="#3574c2" stroke="#2b2d30" stroke-width="1.5"/>
+      <circle cx="80" cy="130" r="5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+      <circle cx="80" cy="145" r="5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+    </svg>
+    <p>✅ 历史完整，谁写了什么一目了然</p>
+    <p>✅ 安全，不改写任何 commit</p>
+    <p style="color:#e07b4c">❌ 网状结构，Merge 节点多</p>
+  </div>
+
+  <div class="card rebase">
+    <h3><span class="badge badge-r">git pull --rebase</span></h3>
+    <svg viewBox="0 0 320 160" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg">
+      <filter id="s7"><feDropShadow dx="0" dy="1" stdDeviation="1" flood-opacity="0.2"/></filter>
+      <line x1="80" y1="20" x2="80" y2="145" stroke="#399644" stroke-width="2"/>
+      <circle cx="80" cy="22" r="5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+      <circle cx="80" cy="48" r="5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+      <circle cx="80" cy="74" r="5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+      <circle cx="80" cy="100" r="5" fill="#3574c2" stroke="#2b2d30" stroke-width="1.5"/>
+      <circle cx="80" cy="126" r="5" fill="#3574c2" stroke="#2b2d30" stroke-width="1.5"/>
+      <circle cx="80" cy="145" r="5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+    </svg>
+    <p>✅ 一条直线，干净</p>
+    <p>✅ 没有额外的 Merge 节点</p>
+    <p style="color:#e07b4c">❌ 重写了 commit hash</p>
+    <p style="color:#e07b4c">❌ 已 push 的 commit rebase 会出事</p>
+  </div>
+</div>
+
+<!-- ====================== 黄金法则 ====================== -->
+<h2>⑤ 什么时候该用哪个</h2>
+<div class="panel" style="padding:18px 24px">
+  <table style="width:100%;font-size:13px;border-collapse:collapse">
+    <tr style="border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:8px 12px;color:var(--text2);font-weight:400;width:28%">场景</th>
+      <th style="text-align:center;padding:8px;color:#e07b4c;width:36%">git merge</th>
+      <th style="text-align:center;padding:8px;color:#5890d8;width:36%">git rebase</th>
+    </tr>
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 12px;color:var(--text2)">多人公共分支（如 main）</td>
+      <td style="padding:8px;text-align:center;color:#59a869">✅ 推荐（你们正在用）</td>
+      <td style="padding:8px;text-align:center;color:#b03939">❌ 危险</td>
+    </tr>
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 12px;color:var(--text2)">个人 feature 分支</td>
+      <td style="padding:8px;text-align:center;color:var(--text2)">可以用</td>
+      <td style="padding:8px;text-align:center;color:#59a869">✅ 推荐</td>
+    </tr>
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 12px;color:var(--text2)">保持历史干净</td>
+      <td style="padding:8px;text-align:center;color:#e07b4c">❌ 会乱</td>
+      <td style="padding:8px;text-align:center;color:#59a869">✅ 直线</td>
+    </tr>
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 12px;color:var(--text2)">安全性</td>
+      <td style="padding:8px;text-align:center;color:#59a869">✅ 不改 hash</td>
+      <td style="padding:8px;text-align:center;color:#e07b4c">⚠ 改写 hash</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;color:var(--text2)">你的 WVP 前端</td>
+      <td style="padding:8px;text-align:center;color:#59a869">✅ 一直在用（675 次）</td>
+      <td style="padding:8px;text-align:center;color:var(--text2)">没用过</td>
+    </tr>
+  </table>
+
+  <div class="callout warn" style="margin-top:16px;font-size:14px;text-align:center">
+    <b>⚠️ 黄金法则：已经 push 过的 commit 绝不要 rebase</b><br>
+    <span style="font-size:12px;color:var(--text2)">
+      否则同事的本地和远端出现分歧，修复起来比 merge 的网状图麻烦 100 倍
+    </span>
+  </div>
+</div>
+
+<!-- ====================== 你的真实数据 ====================== -->
+<h2>⑥ 你的 WVP 前端仓库</h2>
+<div class="stats">
+  <div class="stat"><div class="stat-num">675</div><div class="stat-label">Merge 节点</div></div>
+  <div class="stat"><div class="stat-num">4332</div><div class="stat-label">总 commits</div></div>
+  <div class="stat"><div class="stat-num">15.6%</div><div class="stat-label">合并占比</div></div>
+</div>
+<p style="text-align:center;color:var(--text2);font-size:12px">
+  每 6 个 commit 就有一个是 Merge 节点<br>
+  原因：大家直接 <code style="background:#1e1f22;padding:1px 6px;border-radius:3px;color:#7ee787">git pull</code>，Git 默认 = fetch + merge
+</p>
+
+<!-- ====================== ⑦ 不同人眼里一样吗 ====================== -->
+	<h2>⑦ 同一个仓库，不同人眼里 git tree 一样吗？</h2>
+
+	<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0">
+
+	  <div class="panel" style="padding:20px">
+	    <h3 style="margin:0 0 4px;font-size:15px;color:#e07b4c">⏱ 同步前 — 不一样！</h3>
+	    <p style="font-size:12px;color:var(--text2);margin:0 0 14px">
+	      chenbin 已经 push 了 5 个 commit 到远端<br>
+	      你本地提交了 d836dc2c，还没 pull
+	    </p>
+	    <div style="display:flex;gap:16px">
+	      <div>
+	        <p style="font-size:11px;color:#5890d8;margin:0 0 4px;text-align:center">chenbin 的 IDE</p>
+	        <svg viewBox="0 0 140 190" style="width:115px;height:auto" xmlns="http://www.w3.org/2000/svg">
+	          <line x1="45" y1="18" x2="45" y2="172" stroke="#399644" stroke-width="2"/>
+	          <circle cx="45" cy="28" r="4.5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+	          <circle cx="45" cy="56" r="4.5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+	          <circle cx="45" cy="84" r="4.5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+	          <circle cx="45" cy="112" r="4.5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+	          <circle cx="45" cy="140" r="4.5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+	          <circle cx="45" cy="168" r="4.5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+	          <text x="55" y="32" fill="#8c8c8c" font-size="7">b4d4ca00</text>
+	          <text x="55" y="60" fill="#8c8c8c" font-size="7">d82fa57c</text>
+	          <text x="55" y="88" fill="#8c8c8c" font-size="7">6918db77</text>
+	          <text x="55" y="116" fill="#8c8c8c" font-size="7">962d3e5a</text>
+	          <text x="55" y="144" fill="#8c8c8c" font-size="7">94347729</text>
+	          <text x="55" y="172" fill="#8c8c8c" font-size="7">11505dbf</text>
+	        </svg>
+	        <p style="font-size:10px;color:#59a869;margin:2px 0 0 14px">一条直线，6 个点</p>
+	      </div>
+	      <div>
+	        <p style="font-size:11px;color:#59a869;margin:0 0 4px;text-align:center">你的 IDE</p>
+	        <svg viewBox="0 0 140 190" style="width:115px;height:auto" xmlns="http://www.w3.org/2000/svg">
+	          <line x1="45" y1="28" x2="45" y2="172" stroke="#399644" stroke-width="2"/>
+	          <circle cx="45" cy="38" r="4.5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+	          <circle cx="45" cy="84" r="4.5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+	          <circle cx="45" cy="130" r="4.5" fill="#399644" stroke="#2b2d30" stroke-width="1.5"/>
+	          <text x="55" y="42" fill="#8c8c8c" font-size="7">d836dc2c ← HEAD</text>
+	          <text x="55" y="88" fill="#8c8c8c" font-size="7">11505dbf</text>
+	          <text x="55" y="134" fill="#8c8c8c" font-size="7">c65002c1</text>
+	        </svg>
+	        <p style="font-size:10px;color:#59a869;margin:2px 0 0 6px">也是一条直线，3 个点</p>
+	      </div>
+	    </div>
+	    <p style="font-size:12px;color:#e07b4c;margin:12px 0 0;font-weight:600">
+	      → 完全不同！chenbin 顶上 6 个 commit，你顶上只有 3 个<br>
+	      → HEAD 指向的 commit 不一样，历史长度也不一样
+	    </p>
+	  </div>
+
+	  <div class="panel" style="padding:20px">
+	    <h3 style="margin:0 0 4px;font-size:15px;color:#59a869">⏱ 同步后 — 一样！</h3>
+	    <p style="font-size:12px;color:var(--text2);margin:0 0 14px">
+	      你 git pull → 产生 36a4e158 merge → push<br>
+	      所有人再 git pull
+	    </p>
+	    <div style="display:flex;gap:16px">
+	      <div>
+	        <p style="font-size:11px;color:#5890d8;margin:0 0 4px;text-align:center">chenbin 的 IDE</p>
+	        <svg viewBox="0 0 140 190" style="width:115px;height:auto" xmlns="http://www.w3.org/2000/svg">
+	          <line x1="35" y1="18" x2="35" y2="175" stroke="#399644" stroke-width="2"/>
+	          <line x1="85" y1="62" x2="85" y2="135" stroke="#3574c2" stroke-width="2"/>
+	          <path d="M 35 44 L 58 44 L 72 55 L 85 62" stroke="#6e6e6e" stroke-width="1" fill="none"/>
+	          <path d="M 85 128 L 72 128 L 58 140 L 35 140" stroke="#6e6e6e" stroke-width="1" fill="none"/>
+	          <circle cx="35" cy="26" r="4" fill="#399644" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="35" cy="44" r="5.5" fill="#6e6e6e" stroke="#e07b4c" stroke-width="1.8"/>
+	          <circle cx="35" cy="74" r="4" fill="#399644" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="85" cy="77" r="4" fill="#3574c2" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="85" cy="102" r="4" fill="#3574c2" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="85" cy="127" r="4" fill="#3574c2" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="35" cy="140" r="4" fill="#399644" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="35" cy="165" r="4" fill="#399644" stroke="#2b2d30" stroke-width="1.2"/>
+	        </svg>
+	      </div>
+	      <div>
+	        <p style="font-size:11px;color:#59a869;margin:0 0 4px;text-align:center">你的 IDE</p>
+	        <svg viewBox="0 0 140 190" style="width:115px;height:auto" xmlns="http://www.w3.org/2000/svg">
+	          <line x1="35" y1="18" x2="35" y2="175" stroke="#399644" stroke-width="2"/>
+	          <line x1="85" y1="62" x2="85" y2="135" stroke="#3574c2" stroke-width="2"/>
+	          <path d="M 35 44 L 58 44 L 72 55 L 85 62" stroke="#6e6e6e" stroke-width="1" fill="none"/>
+	          <path d="M 85 128 L 72 128 L 58 140 L 35 140" stroke="#6e6e6e" stroke-width="1" fill="none"/>
+	          <circle cx="35" cy="26" r="4" fill="#399644" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="35" cy="44" r="5.5" fill="#6e6e6e" stroke="#e07b4c" stroke-width="1.8"/>
+	          <circle cx="35" cy="74" r="4" fill="#399644" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="85" cy="77" r="4" fill="#3574c2" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="85" cy="102" r="4" fill="#3574c2" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="85" cy="127" r="4" fill="#3574c2" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="35" cy="140" r="4" fill="#399644" stroke="#2b2d30" stroke-width="1.2"/>
+	          <circle cx="35" cy="165" r="4" fill="#399644" stroke="#2b2d30" stroke-width="1.2"/>
+	        </svg>
+	      </div>
+	    </div>
+	    <p style="font-size:12px;color:#59a869;margin:12px 0 0;font-weight:600">
+	      → 一模一样！merge commit 36a4e158 也被 push 到远端了<br>
+	      → 大家 pull 后得到完全相同的 DAG
+	    </p>
+	  </div>
+	</div>
+
+	<div class="callout info" style="text-align:center">
+	  <b>核心原理：Git 是"最终一致"的</b><br>
+	  短暂瞬间不同人的 git tree 不一样（取决于谁先 pull 了），<br>
+	  但合并完成后所有人 pull，看到的 DAG 完全相同。<br>
+	  因为 merge commit 只是新增一个节点，push 后大家都有。
+	</div>
+
+	<!-- ====================== ⑧ merge vs rebase 安全性 ====================== -->
+	<h2>⑧ 那 rebase 呢？为什么更危险</h2>
+
+	<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0">
+	  <div class="card merge">
+	    <h3 style="margin-top:0"><span class="badge badge-m">merge</span> 不改变已有 commit</h3>
+	    <svg viewBox="0 0 280 90" style="width:100%;height:auto;margin-top:8px" xmlns="http://www.w3.org/2000/svg">
+	      <text x="10" y="14" fill="#8c8c8c" font-size="9">远端（所有人 pull 之后）</text>
+	      <line x1="10" y1="20" x2="270" y2="20" stroke="#399644" stroke-width="2"/>
+	      <circle cx="60" cy="20" r="4" fill="#399644"/>
+	      <circle cx="130" cy="20" r="4" fill="#399644"/>
+	      <circle cx="200" cy="20" r="5.5" fill="#6e6e6e" stroke="#e07b4c" stroke-width="2"/>
+	      <circle cx="260" cy="20" r="4" fill="#399644"/>
+	      <text x="200" y="38" text-anchor="middle" fill="#e07b4c" font-size="10">36a4e158 ← hash 全网统一</text>
+	      <text x="140" y="64" text-anchor="middle" fill="var(--text2)" font-size="11">94347729 还是 94347729，谁看都一样</text>
+	    </svg>
+	    <p style="font-size:12px;color:#59a869;margin-top:6px">✅ 只新增节点，已有 commit hash 不变 → 全宇宙同一个 DAG</p>
+	  </div>
+
+	  <div class="card rebase">
+	    <h3 style="margin-top:0"><span class="badge badge-r">rebase</span> 改写已有 commit hash</h3>
+	    <svg viewBox="0 0 280 90" style="width:100%;height:auto;margin-top:8px" xmlns="http://www.w3.org/2000/svg">
+	      <text x="10" y="14" fill="#8c8c8c" font-size="9">chenbin 本地</text>
+	      <line x1="10" y1="20" x2="180" y2="20" stroke="#399644" stroke-width="2"/>
+	      <circle cx="60" cy="20" r="4" fill="#399644"/>
+	      <circle cx="120" cy="20" r="4" fill="#399644"/>
+	      <circle cx="170" cy="20" r="4" fill="#3574c2"/>
+	      <text x="170" y="36" text-anchor="middle" fill="#5890d8" font-size="9">94347729</text>
+	      <text x="10" y="56" fill="#8c8c8c" font-size="9">远端（你 rebase + force push 之后）</text>
+	      <line x1="10" y1="62" x2="180" y2="62" stroke="#399644" stroke-width="2"/>
+	      <circle cx="60" cy="62" r="4" fill="#399644"/>
+	      <circle cx="120" cy="62" r="4" fill="#399644"/>
+	      <circle cx="170" cy="62" r="4" fill="#e07b4c"/>
+	      <text x="170" y="80" text-anchor="middle" fill="#e07b4c" font-size="9">abc12345（新 hash）</text>
+	      <text x="140" y="96" text-anchor="middle" fill="#e07b4c" font-size="10">同名 commit 有两个版本！</text>
+	    </svg>
+	    <p style="font-size:12px;color:#e07b4c;margin-top:6px">❌ chenbin pull → Git 发现 94347729 ≠ abc12345 → 冲突</p>
+	  </div>
+	</div>
+
+	<div class="callout warn" style="text-align:center;font-size:14px">
+	  <b>⚠️ 这就是黄金法则的根源：</b><br>
+	  <b>merge</b>：加一个节点（merge commit），不动已有节点 → push 后大家 pull，DAG 一致。<br>
+	  <b>rebase</b>：改写已有节点 hash → 如果已 push，别人本地还有旧 hash，产生"分身"冲突。
+	</div>
+
+	<footer>
+	  图中所有 commit hash、提交信息、作者均来自 <code>wvpui/wvp-ui</code> 真实记录 ·
+	  <a href="https://github.com/Cnjszzw/git-merge-vs-rebase-demo/network" target="_blank">GitHub Network Graph →</a>
+	</footer>
+</div>
+
+</body></html>
